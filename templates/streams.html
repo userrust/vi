@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>All Streams</title>
+    <style>
+        body { font-family: Arial, sans-serif; }
+        .stream-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        .stream {
+            width: 320px;
+            height: 240px;
+            background-color: black;
+            border: 1px solid #ccc;
+        }
+        .status {
+            padding: 10px;
+            background: #f0f0f0;
+            margin-top: 10px;
+        }
+    </style>
+</head>
+<body>
+    <h1>All Live Streams</h1>
+    <div class="stream-container" id="stream-container"></div>
+
+    <script>
+        const streamContainer = document.getElementById('stream-container');
+        const websocket = new WebSocket(`ws://${window.location.host}/ws/watch`);
+
+        websocket.onopen = () => {
+            console.log("Connected to server");
+        };
+
+        websocket.onmessage = (event) => {
+            // Здесь будет информация о новых потоках
+            const data = JSON.parse(event.data);
+            if (data.streamer_id) {
+                const streamElement = document.createElement('div');
+                streamElement.classList.add('stream');
+                streamElement.id = `stream-${data.streamer_id}`;
+
+                const videoElement = document.createElement('video');
+                videoElement.setAttribute('autoplay', true);
+                videoElement.setAttribute('playsinline', true);
+                videoElement.id = `video-${data.streamer_id}`;
+
+                streamElement.appendChild(videoElement);
+                streamContainer.appendChild(streamElement);
+
+                // Создаем WebSocket соединение для просмотра потока
+                const streamSocket = new WebSocket(`ws://${window.location.host}/ws/stream/${data.streamer_id}`);
+                streamSocket.onmessage = (msg) => {
+                    const video = document.getElementById(`video-${data.streamer_id}`);
+                    const blob = new Blob([msg.data], { type: 'video/webm' });
+                    const url = URL.createObjectURL(blob);
+                    video.src = url;
+                };
+            }
+        };
+
+        websocket.onerror = (error) => {
+            console.error("WebSocket error:", error);
+        };
+
+        websocket.onclose = () => {
+            console.log("Disconnected from server");
+        };
+    </script>
+</body>
+</html>
