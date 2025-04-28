@@ -24,9 +24,11 @@ Path(VIDEO_DIR).mkdir(exist_ok=True)
 # Монтируем статические файлы
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
+
 @app.get("/")
 async def read_root():
     return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+
 
 @app.post("/upload_video")
 async def upload_video(file: UploadFile = File(...)):
@@ -37,15 +39,15 @@ async def upload_video(file: UploadFile = File(...)):
         with open(filename, "wb") as f:
             content = await file.read()
             f.write(content)
-
+        print(filename)
         logger.info(f"Video saved: {filename}")
         return JSONResponse(
-            content={"message": "Video uploaded successfully"},
+            content={"message":"Video uploaded successfully"},
             status_code=200
         )
     except Exception as e:
         logger.error(f"Error saving video: {e}")
         return JSONResponse(
-            content={"message": "Error uploading video"},
+            content={"message":"Error uploading video"},
             status_code=500
         )
