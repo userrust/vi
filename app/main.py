@@ -1,89 +1,129 @@
-from fastapi import FastAPI, UploadFile, File
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 import os
 import logging
 import datetime
 from pathlib import Path
+from typing import List
 
-app = FastAPI()
+# Инициализация приложения
+app = FastAPI(title="Video Upload Service", version="1.0")
 
-# Настройка логирования
-logging.basicConfig(level=logging.INFO)
+# Настройка CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Конфигурация
+BASE_DIR = Path(__file__).parent.resolve()
+STATIC_DIR = BASE_DIR / "static"
+VIDEO_DIR = BASE_DIR / "videos"
+ALLOWED_EXTENSIONS = {".mp4", ".webm", ".mov"}
+MAX_FILE_SIZE_MB = 50
+
+# Создание директорий
+VIDEO_DIR.mkdir(exist_ok=True)
+STATIC_DIR.mkdir(exist_ok=True)
+
+# Логирование
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger(__name__)
 
-# Пути к директориям (используем абсолютные пути)
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-STATIC_DIR = os.path.join(BASE_DIR, "static")
-VIDEO_DIR = os.path.join(BASE_DIR, "videos")
-
-# Создаем необходимые директории
-Path(STATIC_DIR).mkdir(exist_ok=True)
-Path(VIDEO_DIR).mkdir(exist_ok=True)
-
-# Монтируем статические файлы
+# Монтирование статики
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
-@app.get("/")
+def sanitize_filename(filename: str) -> str:
+    """Очистка имени файла от опасных символов"""
+    return "".join(c for c in filename if c.isalnum() or c in (' ', '.', '_')).rstrip()
+
+
+@app.get("/", response_class=HTMLResponse)
 async def read_root():
-    return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+    """Главная страница с формой загрузки"""
+    return FileResponse(STATIC_DIR / "index.html")
 
 
 @app.post("/upload_video")
 async def upload_video(file: UploadFile = File(...)):
+    """Загрузка видео с конвертацией в MP4"""
     try:
+        # Проверка размера файла
+        file.file.seek(0, 2)
+        file_size = file.file.tell()
+        file.file.seek(0)
+
+        if file_size > MAX_FILE_SIZE_MB * 1024 * 1024:
+            raise HTTPException(413, f"File too large. Max size: {MAX_FILE_SIZE_MB}MB")
+
+        # Проверка расширения
+        file_ext = Path(file.filename).suffix.lower()
+        if file_ext not in ALLOWED_EXTENSIONS:
+            raise HTTPException(400, "Unsupported file format")
+
+        # Генерация имени файла
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = os.path.join(VIDEO_DIR, f"recording_{timestamp}.webm")
+        safe_name = sanitize_filename(Path(file.filename).stem)
+        filename = f"recording_{timestamp}_{safe_name}.mp4"
+        save_path = VIDEO_DIR / filename
 
-        with open(filename, "wb") as f:
+        # Сохранение файла
+        with open(save_path, "wb") as buffer:
             content = await file.read()
-            f.write(content)
-        print(filename)
-        logger.info(f"Video saved: {filename}")
-        return JSONResponse(
-            content={"message":"Video uploaded successfully"},
-            status_code=200
-        )
+            buffer.write(content)
+
+        logger.info(f"Video saved: {filename} ({file_size / 1024 / 1024:.2f}MB)")
+        return {"message":"Video uploaded successfully", "filename":filename}
+
     except Exception as e:
-        logger.error(f"Error saving video: {e}")
-        return JSONResponse(
-            content={"message":"Error uploading video"},
-            status_code=500
-        )
+        logger.error(f"Upload error: {str(e)}")
+        raise HTTPException(500, "Video upload failed")
 
 
-from fastapi.responses import FileResponse
-from fastapi import HTTPException
-
-
-@app.get("/list-videos")
-async def list_videos():
+@app.get("/list-videos", response_model=dict)
+async def list_videos() -> dict:
+    """Список доступных видео"""
     try:
-        videos = [f for f in os.listdir(VIDEO_DIR) if f.endswith('.webm')]
+        videos = [f for f in os.listdir(VIDEO_DIR) if f.endswith('.mp4')]
         return {
             "videos":videos,
             "count":len(videos),
-            "base_url":"https://vi-vsli.onrender.com/videos/"
+            "base_url":"/videos/"
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"List videos error: {str(e)}")
+        raise HTTPException(500, "Could not list videos")
 
 
 @app.get("/videos/{filename}")
 async def serve_video(filename: str):
-    # Безопасно соединяем пути
-    filepath = os.path.join(VIDEO_DIR, filename)
+    """Отдача видеофайла"""
+    try:
+        filepath = VIDEO_DIR / sanitize_filename(filename)
 
-    # Защита от path traversal атак
-    if not os.path.abspath(filepath).startswith(os.path.abspath(VIDEO_DIR)):
-        raise HTTPException(status_code=403, detail="Access denied")
+        if not filepath.exists() or not filepath.is_file():
+            raise HTTPException(404, "File not found")
 
-    if os.path.exists(filepath):
         return FileResponse(
             filepath,
-            media_type="video/webm",
-            headers={"Content-Disposition":f"inline; filename={filename}"}
+            media_type="video/mp4",
+            headers={
+                "Content-Disposition":f"inline; filename={filepath.name}",
+                "Cache-Control":"public, max-age=3600"
+            }
         )
+    except Exception as e:
+        logger.error(f"Video serve error: {str(e)}")
+        raise HTTPException(500, "Could not serve video")
 
-    raise HTTPException(status_code=404, detail="File not found")
+# Для конвертации в MP4 можно добавить (требует ffmpeg):
+# async def convert_to_mp4(input_path: Path, output_path: Path):
+#     ...
