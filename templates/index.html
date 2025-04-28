@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Webcam Streamer</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #video-container { margin: 20px 0; }
+        #webcam { background: #000; width: 640px; height: 480px; }
+        .status { margin: 10px 0; padding: 10px; background: #f0f0f0; }
+    </style>
+</head>
+<body>
+    <h1>Webcam Streamer</h1>
+    <div class="status" id="status">Status: Not streaming</div>
+    <div id="video-container">
+        <video id="webcam" autoplay playsinline></video>
+    </div>
+    <p><a href="/vid" target="_blank">Open viewer page</a></p>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const statusDiv = document.getElementById('status');
+        let socket;
+        let stream;
+        let mediaRecorder;
+
+        async function startWebcam() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: {
+                        width: { ideal: 640 },
+                        height: { ideal: 480 },
+                        frameRate: { ideal: 30 }
+                    },
+                    audio: false
+                });
+                video.srcObject = stream;
+                statusDiv.textContent = "Status: Webcam active";
+
+                mediaRecorder = new MediaRecorder(stream, {
+                    mimeType: 'video/webm; codecs=vp8',
+                    videoBitsPerSecond: 2500000
+                });
+
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0 && socket.readyState === WebSocket.OPEN) {
+                        socket.send(e.data); // Отправляем данные на сервер
+                    }
+                };
+
+                mediaRecorder.start(100); // Отправляем данные каждые 100мс
+
+            } catch (err) {
+                statusDiv.textContent = `Error: ${err.message}`;
+                console.error("Error accessing webcam:", err);
+            }
+        }
+
+        function connectWebSocket() {
+            // Явно указываем IP сервера
+            socket = new WebSocket(`ws://192.168.1.63:8000/ws/stream`);
+
+            socket.onopen = () => {
+                statusDiv.textContent = "Status: Connected to server";
+                startWebcam(); // Запускаем захват видео
+            };
+
+            socket.onclose = () => {
+                statusDiv.textContent = "Status: Disconnected from server";
+                if (stream) {
+                    stream.getTracks().forEach(track => track.stop());
+                }
+                if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                    mediaRecorder.stop();
+                }
+            };
+
+            socket.onerror = (error) => {
+                console.error('WebSocket error:', error);
+            };
+        }
+
+        // Инициализация при загрузке страницы
+        window.onload = connectWebSocket;
+
+        // Очистка при закрытии страницы
+        window.onbeforeunload = () => {
+            if (socket) socket.close();
+            if (stream) stream.getTracks().forEach(track => track.stop());
+        };
+    </script>
+</body>
+</html>

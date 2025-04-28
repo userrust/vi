@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Video Stream Viewer</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #video-container { margin: 20px 0; text-align: center; }
+        #stream { background: #000; max-width: 100%; max-height: 80vh; }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 4px;
+        }
+        .error { color: #d32f2f; }
+    </style>
+</head>
+<body>
+    <h1>Watching Stream</h1>
+    <div class="status" id="status">Status: Initializing...</div>
+    <div id="video-container">
+        <video id="stream" autoplay playsinline muted></video>
+    </div>
+    <p><a href="/">Back to streamer page</a></p>
+    <div id="error" class="error"></div>
+
+    <script>
+        const video = document.getElementById('stream');
+        const statusDiv = document.getElementById('status');
+        const errorDiv = document.getElementById('error');
+
+        // Состояние приложения
+        const state = {
+            socket: null,
+            mediaSource: null,
+            sourceBuffer: null,
+            bufferQueue: [],
+            isAppending: false,
+            reconnectAttempts: 0,
+            maxReconnectAttempts: 5,
+            isMediaSourceOpen: false,
+            mimeType: null
+        };
+
+        // Показать сообщение об ошибке
+        function showError(message) {
+            errorDiv.textContent = message;
+            console.error(message);
+        }
+
+        // Обновить статус
+        function updateStatus(message) {
+            statusDiv.textContent = `Status: ${message}`;
+            console.log(message);
+        }
+
+        // Инициализация MediaSource
+        function initMediaSource() {
+            try {
+                // Закрыть предыдущий MediaSource, если он существует
+                if (state.mediaSource && state.mediaSource.readyState !== 'closed') {
+                    state.mediaSource.endOfStream();
+                    URL.revokeObjectURL(video.src);
+                }
+
+                // Создать новый MediaSource
+                state.mediaSource = new MediaSource();
+                state.isMediaSourceOpen = false;
+                state.sourceBuffer = null;
+                state.bufferQueue = [];
+                state.isAppending = false;
+
+                const objectUrl = URL.createObjectURL(state.mediaSource);
+                video.src = objectUrl;
+
+                // Обработчики событий MediaSource
+                state.mediaSource.addEventListener('sourceopen', handleSourceOpen);
+                state.mediaSource.addEventListener('sourceended', () => {
+                    updateStatus("Stream ended");
+                    state.isMediaSourceOpen = false;
+                });
+                state.mediaSource.addEventListener('sourceclose', () => {
+                    updateStatus("Stream closed");
+                    state.isMediaSourceOpen = false;
+                });
+
+                updateStatus("MediaSource initialized");
+            } catch (error) {
+                showError(`MediaSource Error: ${error.message}`);
+            }
+        }
+
+        // Обработчик открытия MediaSource
+        function handleSourceOpen() {
+            try {
+                state.isMediaSourceOpen = true;
+
+                // Попробуем поддерживаемые MIME-типы
+                const mimeTypes = [
+                    'video/webm; codecs="vp8,opus"',
+                    'video/webm; codecs="vp9,opus"',
+                    'video/webm; codecs="vp8"',
+                    'video/mp4; codecs="avc1.42E01E,mp4a.40.2"'
+                ];
+
+                // Найти поддерживаемый MIME-тип
+                for (const mimeType of mimeTypes) {
+                    if (MediaSource.isTypeSupported(mimeType)) {
+                        try {
+                            state.sourceBuffer = state.mediaSource.addSourceBuffer(mimeType);
+                            state.mimeType = mimeType;
+                            state.sourceBuffer.mode = 'sequence';
+
+                            state.sourceBuffer.addEventListener('updateend', processBufferQueue);
+                            state.sourceBuffer.addEventListener('error', (e) => {
+                                showError(`SourceBuffer error: ${e.message}`);
+                                resetMediaSource();
+                            });
+
+                            updateStatus(`Using codec: ${mimeType}`);
+                            processBufferQueue(); // Обработать данные в очереди
+                            return;
+                        } catch (e) {
+                            console.warn(`Failed to create SourceBuffer for ${mimeType}: ${e.message}`);
+                        }
+                    }
+                }
+
+                throw new Error("No supported video codecs found");
+            } catch (error) {
+                showError(`SourceBuffer Error: ${error.message}`);
+                resetMediaSource();
+            }
+        }
+
+        // Сбросить MediaSource и переинициализировать
+        function resetMediaSource() {
+            updateStatus("Resetting MediaSource...");
+            initMediaSource();
+            if (state.socket && state.socket.readyState === WebSocket.OPEN) {
+                // Можно отправить запрос на повторную передачу ключевых кадров
+                state.socket.send("reset");
+            }
+        }
+
+        // Обработка очереди буферов
+        function processBufferQueue() {
+            if (!state.isMediaSourceOpen || !state.sourceBuffer ||
+                state.sourceBuffer.updating || state.bufferQueue.length === 0) {
+                state.isAppending = false;
+                return;
+            }
+
+            state.isAppending = true;
+            const buffer = state.bufferQueue.shift();
+
+            try {
+                state.sourceBuffer.appendBuffer(buffer);
+            } catch (error) {
+                showError(`AppendBuffer Error: ${error.message}`);
+                state.isAppending = false;
+
+                // Если SourceBuffer был удалён, переинициализируем MediaSource
+                if (error.message.includes('removed from the parent media source')) {
+                    resetMediaSource();
+                } else {
+                    // Попробуем снова через 100мс
+                    setTimeout(processBufferQueue, 100);
+                }
+            }
+        }
+
+        // Подключение к WebSocket
+        function connectWebSocket() {
+            if (state.reconnectAttempts >= state.maxReconnectAttempts) {
+                showError("Max reconnection attempts reached. Please refresh the page.");
+                return;
+            }
+
+            updateStatus(`Connecting... (Attempt ${state.reconnectAttempts + 1}/${state.maxReconnectAttempts})`);
+
+            try {
+                // Закрыть предыдущее соединение, если оно есть
+                if (state.socket) {
+                    state.socket.close();
+                }
+
+                state.socket = new WebSocket(`ws://${window.location.host}/ws/watch`);
+
+                state.socket.onopen = () => {
+                    state.reconnectAttempts = 0;
+                    updateStatus("Connected, waiting for stream...");
+                };
+
+                state.socket.onmessage = async (event) => {
+                    if (event.data instanceof Blob) {
+                        try {
+                            const buffer = await event.data.arrayBuffer();
+                            state.bufferQueue.push(buffer);
+                            processBufferQueue();
+                        } catch (error) {
+                            showError(`Data processing error: ${error.message}`);
+                        }
+                    } else if (event.data === "reset") {
+                        // Сервер запросил сброс
+                        resetMediaSource();
+                    }
+                };
+
+                state.socket.onclose = (event) => {
+                    if (event.wasClean) {
+                        updateStatus("Connection closed cleanly");
+                    } else {
+                        updateStatus("Connection lost, reconnecting...");
+                        state.reconnectAttempts++;
+                        setTimeout(connectWebSocket, Math.min(1000 * state.reconnectAttempts, 5000));
+                    }
+                };
+
+                state.socket.onerror = (error) => {
+                    showError(`WebSocket Error: ${error.message}`);
+                };
+            } catch (error) {
+                showError(`WebSocket Connection Error: ${error.message}`);
+            }
+        }
+
+        // Инициализация при загрузке страницы
+        window.addEventListener('load', () => {
+            initMediaSource();
+            connectWebSocket();
+        });
+
+        // Очистка при закрытии страницы
+        window.addEventListener('beforeunload', () => {
+            if (state.socket) {
+                state.socket.close();
+            }
+            if (state.mediaSource && state.mediaSource.readyState === 'open') {
+                state.mediaSource.endOfStream();
+            }
+        });
+
+        // Периодическая проверка состояния
+        setInterval(() => {
+            if (state.mediaSource) {
+                console.log('MediaSource readyState:', state.mediaSource.readyState);
+            }
+            if (state.sourceBuffer) {
+                console.log('SourceBuffer updating:', state.sourceBuffer.updating);
+            }
+        }, 5000);
+    </script>
+</body>
+</html>
