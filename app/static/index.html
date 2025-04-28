@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Video Recorder</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #video-container { margin: 20px 0; }
+        #webcam { background: #000; width: 640px; height: 480px; }
+        .status { margin: 10px 0; padding: 10px; background: #f0f0f0; }
+        button { padding: 8px 16px; font-size: 16px; margin-right: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Video Recorder</h1>
+    <div class="status" id="status">Status: Ready</div>
+    <div id="video-container">
+        <video id="webcam" autoplay playsinline></video>
+    </div>
+    <button id="startBtn">Start Recording</button>
+    <button id="stopBtn" disabled>Stop Recording</button>
+
+    <script>
+        const video = document.getElementById('webcam');
+        const statusDiv = document.getElementById('status');
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        let stream;
+        let mediaRecorder;
+        let recordedChunks = [];
+        let recordingInterval;
+        let isRecording = false;
+
+        async function startWebcam() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    video: { width: 640, height: 480, frameRate: 30 },
+                    audio: false
+                });
+                video.srcObject = stream;
+                return true;
+            } catch (err) {
+                statusDiv.textContent = `Error: ${err.message}`;
+                return false;
+            }
+        }
+
+        async function startRecording() {
+            if (!await startWebcam()) return;
+
+            recordedChunks = [];
+            mediaRecorder = new MediaRecorder(stream, {
+                mimeType: 'video/webm'
+            });
+
+            mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) {
+                    recordedChunks.push(e.data);
+                }
+            };
+
+            mediaRecorder.start(1000);
+
+            recordingInterval = setInterval(async () => {
+                if (recordedChunks.length > 0) {
+                    await sendVideoToServer();
+                }
+            }, 60000);
+
+            statusDiv.textContent = "Status: Recording...";
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            isRecording = true;
+        }
+
+        function stopRecording() {
+            if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+                mediaRecorder.stop();
+            }
+            clearInterval(recordingInterval);
+
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+
+            statusDiv.textContent = "Status: Recording stopped";
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            isRecording = false;
+        }
+
+        async function sendVideoToServer() {
+            if (recordedChunks.length === 0) return;
+
+            const blob = new Blob(recordedChunks, { type: 'video/webm' });
+            recordedChunks = [];
+
+            try {
+                const formData = new FormData();
+                formData.append('file', blob, `recording_${Date.now()}.webm`);
+
+                const response = await fetch('/upload_video', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                if (response.ok) {
+                    statusDiv.textContent = "Status: Video uploaded successfully";
+                } else {
+                    statusDiv.textContent = "Status: Error uploading video";
+                }
+            } catch (error) {
+                console.error('Upload error:', error);
+                statusDiv.textContent = `Status: Upload failed - ${error.message}`;
+            }
+        }
+
+        startBtn.addEventListener('click', startRecording);
+        stopBtn.addEventListener('click', stopRecording);
+
+        window.addEventListener('beforeunload', () => {
+            if (isRecording) {
+                stopRecording();
+            }
+        });
+    </script>
+</body>
+</html>
