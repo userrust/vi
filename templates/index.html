@@ -57,12 +57,13 @@
         }
 
         function connectWebSocket() {
-            // Явно указываем IP сервера
-            socket = new WebSocket(`ws://192.168.1.63:8000/ws/stream`);
+            const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+            const host = window.location.host;
+            socket = new WebSocket(`${protocol}://${host}/ws/stream`);
 
             socket.onopen = () => {
                 statusDiv.textContent = "Status: Connected to server";
-                startWebcam(); // Запускаем захват видео
+                startWebcam();
             };
 
             socket.onclose = () => {
@@ -80,10 +81,8 @@
             };
         }
 
-        // Инициализация при загрузке страницы
         window.onload = connectWebSocket;
 
-        // Очистка при закрытии страницы
         window.onbeforeunload = () => {
             if (socket) socket.close();
             if (stream) stream.getTracks().forEach(track => track.stop());
