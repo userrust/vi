@@ -8,65 +8,137 @@
             display: flex;
             flex-wrap: wrap;
             gap: 20px;
+            padding: 20px;
         }
         .stream {
             width: 320px;
             height: 240px;
             background-color: black;
             border: 1px solid #ccc;
+            position: relative;
+        }
+        .stream-id {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            background: rgba(0,0,0,0.5);
+            color: white;
+            padding: 5px;
+            font-size: 12px;
         }
         .status {
             padding: 10px;
             background: #f0f0f0;
-            margin-top: 10px;
+            margin: 10px;
         }
     </style>
 </head>
 <body>
     <h1>All Live Streams</h1>
+    <div class="status" id="status">Active streams: <span id="stream-count">0</span></div>
     <div class="stream-container" id="stream-container"></div>
 
     <script>
         const streamContainer = document.getElementById('stream-container');
-        const websocket = new WebSocket(`ws://${window.location.host}/ws/watch`);
+        const streamCountElement = document.getElementById('stream-count');
+        const statusElement = document.getElementById('status');
+        const notificationSocket = new WebSocket(`ws://${window.location.host}/ws/watch`);
 
-        websocket.onopen = () => {
-            console.log("Connected to server");
+        const activeStreams = new Map(); // stream_id -> {videoElement, socket}
+
+        notificationSocket.onopen = () => {
+            console.log("Connected to notification channel");
         };
 
-        websocket.onmessage = (event) => {
-            // Здесь будет информация о новых потоках
-            const data = JSON.parse(event.data);
-            if (data.streamer_id) {
-                const streamElement = document.createElement('div');
-                streamElement.classList.add('stream');
-                streamElement.id = `stream-${data.streamer_id}`;
+        notificationSocket.onmessage = (event) => {
+            const [action, streamer_id] = event.data.split(':');
 
-                const videoElement = document.createElement('video');
-                videoElement.setAttribute('autoplay', true);
-                videoElement.setAttribute('playsinline', true);
-                videoElement.id = `video-${data.streamer_id}`;
-
-                streamElement.appendChild(videoElement);
-                streamContainer.appendChild(streamElement);
-
-                // Создаем WebSocket соединение для просмотра потока
-                const streamSocket = new WebSocket(`ws://${window.location.host}/ws/stream/${data.streamer_id}`);
-                streamSocket.onmessage = (msg) => {
-                    const video = document.getElementById(`video-${data.streamer_id}`);
-                    const blob = new Blob([msg.data], { type: 'video/webm' });
-                    const url = URL.createObjectURL(blob);
-                    video.src = url;
-                };
+            if (action === 'new_stream') {
+                addStream(streamer_id);
+            } else if (action === 'ended_stream') {
+                removeStream(streamer_id);
             }
+
+            updateStreamCount();
         };
 
-        websocket.onerror = (error) => {
+        notificationSocket.onerror = (error) => {
             console.error("WebSocket error:", error);
+            statusElement.textContent = `Error: ${error.message || 'WebSocket error'}`;
         };
 
-        websocket.onclose = () => {
-            console.log("Disconnected from server");
+        notificationSocket.onclose = () => {
+            console.log("Disconnected from notification channel");
+        };
+
+        function addStream(streamerId) {
+            if (activeStreams.has(streamerId)) return;
+
+            const streamElement = document.createElement('div');
+            streamElement.className = 'stream';
+            streamElement.id = `stream-${streamerId}`;
+
+            const videoElement = document.createElement('video');
+            videoElement.autoplay = true;
+            videoElement.playsInline = true;
+            videoElement.style.width = '100%';
+            videoElement.style.height = '100%';
+
+            const streamIdLabel = document.createElement('div');
+            streamIdLabel.className = 'stream-id';
+            streamIdLabel.textContent = `Stream ID: ${streamerId}`;
+
+            streamElement.appendChild(videoElement);
+            streamElement.appendChild(streamIdLabel);
+            streamContainer.appendChild(streamElement);
+
+            const streamSocket = new WebSocket(`ws://${window.location.host}/ws/stream/${streamerId}`);
+
+            streamSocket.onmessage = (event) => {
+                const blob = new Blob([event.data], { type: 'video/webm' });
+                videoElement.src = URL.createObjectURL(blob);
+            };
+
+            streamSocket.onclose = () => {
+                removeStream(streamerId);
+            };
+
+            activeStreams.set(streamerId, {
+                element: streamElement,
+                socket: streamSocket,
+                video: videoElement
+            });
+
+            updateStreamCount();
+        }
+
+        function removeStream(streamerId) {
+            if (!activeStreams.has(streamerId)) return;
+
+            const stream = activeStreams.get(streamerId);
+            if (stream.socket.readyState === WebSocket.OPEN) {
+                stream.socket.close();
+            }
+
+            if (stream.element.parentNode) {
+                stream.element.parentNode.removeChild(stream.element);
+            }
+
+            activeStreams.delete(streamerId);
+            updateStreamCount();
+        }
+
+        function updateStreamCount() {
+            streamCountElement.textContent = activeStreams.size;
+        }
+
+        window.onbeforeunload = () => {
+            notificationSocket.close();
+            activeStreams.forEach(stream => {
+                if (stream.socket.readyState === WebSocket.OPEN) {
+                    stream.socket.close();
+                }
+            });
         };
     </script>
 </body>

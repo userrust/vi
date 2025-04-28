@@ -15,7 +15,7 @@
     <div id="video-container">
         <video id="webcam" autoplay playsinline></video>
     </div>
-    <p><a href="/vid" target="_blank">Open viewer page</a></p>
+    <p><a href="/streams" target="_blank">View all streams</a></p>
 
     <script>
         const video = document.getElementById('webcam');
@@ -23,6 +23,7 @@
         let socket;
         let stream;
         let mediaRecorder;
+        let streamerId;
 
         async function startWebcam() {
             try {
@@ -44,11 +45,11 @@
 
                 mediaRecorder.ondataavailable = (e) => {
                     if (e.data.size > 0 && socket.readyState === WebSocket.OPEN) {
-                        socket.send(e.data); // Отправляем данные на сервер
+                        socket.send(e.data);
                     }
                 };
 
-                mediaRecorder.start(100); // Отправляем данные каждые 100мс
+                mediaRecorder.start(100);
 
             } catch (err) {
                 statusDiv.textContent = `Error: ${err.message}`;
@@ -78,6 +79,7 @@
 
             socket.onerror = (error) => {
                 console.error('WebSocket error:', error);
+                statusDiv.textContent = `Error: ${error.message || 'WebSocket error'}`;
             };
         }
 
