@@ -51,3 +51,39 @@ async def upload_video(file: UploadFile = File(...)):
             content={"message":"Error uploading video"},
             status_code=500
         )
+
+
+from fastapi.responses import FileResponse
+from fastapi import HTTPException
+
+
+@app.get("/list-videos")
+async def list_videos():
+    try:
+        videos = [f for f in os.listdir(VIDEO_DIR) if f.endswith('.webm')]
+        return {
+            "videos":videos,
+            "count":len(videos),
+            "base_url":"https://vi-vsli.onrender.com/videos/"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/videos/{filename}")
+async def serve_video(filename: str):
+    # Безопасно соединяем пути
+    filepath = os.path.join(VIDEO_DIR, filename)
+
+    # Защита от path traversal атак
+    if not os.path.abspath(filepath).startswith(os.path.abspath(VIDEO_DIR)):
+        raise HTTPException(status_code=403, detail="Access denied")
+
+    if os.path.exists(filepath):
+        return FileResponse(
+            filepath,
+            media_type="video/webm",
+            headers={"Content-Disposition":f"inline; filename={filename}"}
+        )
+
+    raise HTTPException(status_code=404, detail="File not found")
